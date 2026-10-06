@@ -1,0 +1,265 @@
+package render
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// Preserved donor regression through the unchanged renderer entry point.
+func TestGenerateSwiftClientCounterGolden(t *testing.T) {
+	schemaPath := filepath.Join("..", "..", "testdata", "counter.json")
+	s, err := readSchema(schemaPath)
+	if err != nil {
+		t.Fatalf("ParseFile(%s) returned error: %v", schemaPath, err)
+	}
+
+	got, err := GenerateSwiftClient(s, "counter")
+	if err != nil {
+		t.Fatalf("GenerateSwiftClient returned error: %v", err)
+	}
+
+	goldenPath := filepath.Join("..", "..", "testdata", "CounterClient.swift.golden")
+	want, err := os.ReadFile(goldenPath)
+	if err != nil {
+		t.Fatalf("read golden file %s: %v", goldenPath, err)
+	}
+
+	if !bytes.Equal(got, want) {
+		t.Fatalf("generated Swift mismatch (-want +got):\n%s", simpleLineDiff(want, got))
+	}
+}
+
+// Preserved donor regression through the unchanged renderer entry point.
+func TestGenerateSwiftClientSortsMethodsByINS(t *testing.T) {
+	s := &Schema{
+		Applet: Applet{
+			Name: "Demo",
+			AID:  "A000000001",
+			CLA:  0x80,
+		},
+		Methods: map[string]*Method{
+			"third":  {Name: "third", INS: 0x03},
+			"first":  {Name: "first", INS: 0x01},
+			"second": {Name: "second", INS: 0x02},
+		},
+		StatusWords: map[string]StatusWord{
+			"SW_OK": {Name: "SW_OK", Code: 0x9000},
+		},
+	}
+
+	got, err := GenerateSwiftClient(s, "demo")
+	if err != nil {
+		t.Fatalf("GenerateSwiftClient returned error: %v", err)
+	}
+
+	src := string(got)
+	idxFirst := strings.Index(src, "// MARK: - first")
+	idxSecond := strings.Index(src, "// MARK: - second")
+	idxThird := strings.Index(src, "// MARK: - third")
+	if idxFirst == -1 || idxSecond == -1 || idxThird == -1 {
+		t.Fatalf("generated source missing expected methods:\n%s", src)
+	}
+	if !(idxFirst < idxSecond && idxSecond < idxThird) {
+		t.Fatalf("methods are not sorted by INS:\n%s", src)
+	}
+}
+
+// Preserved donor regression through the unchanged renderer entry point.
+func TestGenerateSwiftClientCounterAPDUConstruction(t *testing.T) {
+	s := parseCounter(t)
+	got, err := GenerateSwiftClient(s, "counter")
+	if err != nil {
+		t.Fatalf("GenerateSwiftClient returned error: %v", err)
+	}
+
+	src := string(got)
+
+	requireContains(t, src, "import Foundation")
+	requireNotContains(t, src, "import JavaCardRPCClient")
+	requireContains(t, src, "public protocol CounterTransport: Sendable {")
+	requireContains(t, src, "func transmit(cla: UInt8, ins: UInt8, p1: UInt8, p2: UInt8, data: Data?) async throws -> (sw: UInt16, data: Data)")
+	requireContains(t, src, "private let transport: any CounterTransport")
+	requireContains(t, src, "public init(transport: any CounterTransport)")
+	requireContains(t, src, "public static let aid = Data([0xF0, 0x00, 0x00, 0x01, 0x01])")
+	requireContains(t, src, "private static let cla: UInt8 = 0xB0")
+	requireContains(t, src, "let (sw, _) = try await transport.transmit(cla: 0x00, ins: 0xA4, p1: 0x04, p2: 0x00, data: Self.aid)")
+	requireContains(t, src, "let (sw, respData) = try await transport.transmit(cla: Self.cla, ins: 0x01, p1: amount, p2: 0x00, data: nil)")
+	requireContains(t, src, "let (sw, _) = try await transport.transmit(cla: Self.cla, ins: 0x05, p1: 0x00, p2: 0x00, data: data)")
+	requireContains(t, src, "try Self.checkStatusWord(sw)")
+	requireContains(t, src, "var data = Data(count: 2)")
+	requireContains(t, src, "data[0] = UInt8(limit >> 8)")
+	requireContains(t, src, "data[1] = UInt8(limit & 0xFF)")
+	requireContains(t, src, "public func setCount(value: UInt32) async throws")
+	requireContains(t, src, "data[0] = UInt8((value >> 24) & 0xFF)")
+	requireContains(t, src, "data[1] = UInt8((value >> 16) & 0xFF)")
+	requireContains(t, src, "data[2] = UInt8((value >> 8) & 0xFF)")
+	requireContains(t, src, "data[3] = UInt8(value & 0xFF)")
+	requireContains(t, src, "public func setEnabled(enabled: Bool) async throws")
+	requireContains(t, src, "ins: 0x0A, p1: (enabled ? 0x01 : 0x00), p2: 0x00")
+	requireContains(t, src, "public func getHash() async throws -> Data")
+	requireContains(t, src, "return try Self.readBytes(from: respData, at: 0, count: 32)")
+	requireContains(t, src, "return try Self.readU16(from: respData, at: 0)")
+	requireContains(t, src, "version: try Self.readU8(from: respData, at: 4)")
+	requireContains(t, src, "public struct CounterInfo: Sendable, Equatable")
+	requireContains(t, src, "public enum CounterError")
+	requireContains(t, src, "public static let swUnderflow: UInt16 = 0x6985")
+}
+
+// Preserved donor regression through the unchanged renderer entry point.
+func TestGenerateSwiftClientSupportsASCIIFields(t *testing.T) {
+	s := &Schema{
+		Applet: Applet{
+			Name: "Demo",
+			AID:  "A000000001",
+			CLA:  0x80,
+		},
+		Methods: map[string]*Method{
+			"setImsi": {
+				Name: "setImsi",
+				INS:  0x01,
+				Request: &Message{Fields: []Field{
+					{Name: "imsi", Type: FieldTypeASCII, Length: intPtr(15), Location: ParameterLocationData},
+				}},
+			},
+			"getImsi": {
+				Name: "getImsi",
+				INS:  0x02,
+				Response: &Message{Fields: []Field{
+					{Name: "imsi", Type: FieldTypeASCII},
+				}},
+			},
+		},
+	}
+
+	got, err := GenerateSwiftClient(s, "demo")
+	if err != nil {
+		t.Fatalf("GenerateSwiftClient returned error: %v", err)
+	}
+
+	src := string(got)
+	requireContains(t, src, "public func setImsi(imsi: String) async throws")
+	requireContains(t, src, "let data = try Self.asciiData(from: imsi)")
+	requireContains(t, src, "if data.count != 15 { throw TransportError.invalidResponse }")
+	requireContains(t, src, "public func getImsi() async throws -> String")
+	requireContains(t, src, "return try Self.readASCII(from: respData, at: 0)")
+	requireContains(t, src, "private static func readASCII(from data: Data, at offset: Int) throws -> String")
+	requireContains(t, src, "private static func asciiData(from value: String) throws -> Data")
+}
+
+// Preserved donor regression through the unchanged renderer entry point.
+func TestGenerateSwiftClientSupportsStringFields(t *testing.T) {
+	s := &Schema{
+		Applet: Applet{
+			Name: "Demo",
+			AID:  "A000000001",
+			CLA:  0x80,
+		},
+		Methods: map[string]*Method{
+			"echoMessage": {
+				Name: "echoMessage",
+				INS:  0x01,
+				Request: &Message{Fields: []Field{
+					{Name: "message", Type: FieldTypeString, Location: ParameterLocationData},
+				}},
+				Response: &Message{Fields: []Field{
+					{Name: "message", Type: FieldTypeString},
+				}},
+			},
+		},
+	}
+
+	got, err := GenerateSwiftClient(s, "demo")
+	if err != nil {
+		t.Fatalf("GenerateSwiftClient returned error: %v", err)
+	}
+
+	src := string(got)
+	requireContains(t, src, "public func echoMessage(message: String) async throws -> String")
+	requireContains(t, src, "let data = try Self.utf8Data(from: message)")
+	requireContains(t, src, "return try Self.readString(from: respData, at: 0)")
+	requireContains(t, src, "private static func readString(from data: Data, at offset: Int) throws -> String")
+	requireContains(t, src, "private static func utf8Data(from value: String) throws -> Data")
+}
+
+func intPtr(v int) *int {
+	return &v
+}
+
+func requireContains(t *testing.T, src, needle string) {
+	t.Helper()
+	if !strings.Contains(src, needle) {
+		t.Fatalf("generated source missing expected snippet: %q", needle)
+	}
+}
+
+func requireNotContains(t *testing.T, src, needle string) {
+	t.Helper()
+	if strings.Contains(src, needle) {
+		t.Fatalf("generated source unexpectedly contains snippet: %q", needle)
+	}
+}
+
+func simpleLineDiff(want, got []byte) string {
+	wantLines := strings.Split(string(want), "\n")
+	gotLines := strings.Split(string(got), "\n")
+	maxLines := len(wantLines)
+	if len(gotLines) > maxLines {
+		maxLines = len(gotLines)
+	}
+
+	var b strings.Builder
+	diffCount := 0
+	for i := 0; i < maxLines; i++ {
+		var w string
+		if i < len(wantLines) {
+			w = wantLines[i]
+		}
+		var g string
+		if i < len(gotLines) {
+			g = gotLines[i]
+		}
+		if w == g {
+			continue
+		}
+		diffCount++
+		fmt.Fprintf(&b, "@@ line %d @@\n- %s\n+ %s\n", i+1, w, g)
+		if diffCount >= 40 {
+			b.WriteString("... (diff truncated)\n")
+			break
+		}
+	}
+
+	if diffCount == 0 && len(want) != len(got) {
+		fmt.Fprintf(&b, "byte lengths differ: want=%d got=%d\n", len(want), len(got))
+	}
+
+	if b.Len() == 0 {
+		return "(no line-level diff available)"
+	}
+	return b.String()
+}
+
+func readSchema(path string) (*Schema, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var fixture struct{ Schema *Schema }
+	if err := json.Unmarshal(data, &fixture); err != nil {
+		return nil, err
+	}
+	return fixture.Schema, nil
+}
+func parseCounter(t *testing.T) *Schema {
+	t.Helper()
+	s, err := readSchema(filepath.Join("..", "..", "testdata", "counter.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}

@@ -16,5 +16,6 @@ let package = Package(
             name: "JavaCardRPCClient",
             path: "Sources/JavaCardRPCClient"
         ),
+        .testTarget(name: "JavaCardRPCClientTests", dependencies: ["JavaCardRPCClient"]),
     ]
 )
