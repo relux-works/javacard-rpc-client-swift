@@ -1,3 +1,16 @@
+# v0.2.3 — generic storage fixtures
+
+This patch publishes the accepted generic storage fixture used by stream
+refusal tests. The root tag `v0.2.3` selects both the Go backend module
+`github.com/relux-works/javacard-rpc-client-swift v0.2.3` and the SwiftPM runtime
+at exact version `0.2.3`.
+
+The plugin API dependency remains `pluginapi v0.1.0`. Renderer output, public
+APIs, supported platforms and runtime behavior are unchanged. `Package.swift`
+has no separate version field. Existing Go generated-client tests and native
+Swift Testing remain the release checks; they do not establish physical-card
+or live TCP behavior. Exact commands and output locations are in the README.
+
 # v0.2.2 — Swift backend and runtime
 
 ## Shared ecosystem pins

@@ -26,15 +26,15 @@ and release delivery are handled in the facade repository.
 ## Installation (Swift Package Manager)
 
 ```swift
-.package(url: "https://github.com/relux-works/javacard-rpc-client-swift.git", exact: "0.2.2")
+.package(url: "https://github.com/relux-works/javacard-rpc-client-swift.git", exact: "0.2.3")
 ```
 
 ```swift
 .product(name: "JavaCardRPCClient", package: "javacard-rpc-client-swift")
 ```
 
-Version `0.2.2` uses the shared root tag `v0.2.2`. The matching Go backend pin is
-`github.com/relux-works/javacard-rpc-client-swift v0.2.2` (import
+Version `0.2.3` uses the shared root tag `v0.2.3`. The matching Go backend pin is
+`github.com/relux-works/javacard-rpc-client-swift v0.2.3` (import
 `github.com/relux-works/javacard-rpc-client-swift/codegen`). Both resolve to
 the same repository commit. See [release notes](RELEASE_NOTES.md) for the
 changes and compatibility limits.
